@@ -6,9 +6,16 @@ import CostChart from './CostChart';
 import TouTable from './TouTable';
 import DemandPanel from './DemandPanel';
 import CppPanel from './CppPanel';
+import BatteryPanel, { type BatteryPlanRow, type PerfectPlanRow } from './BatteryPanel';
 import type { Intervals, ParseResult } from '../lib/espi';
-import { calcAll, type PlanResult } from '../lib/calc';
+import { calcAll, calcPlan, type PlanResult } from '../lib/calc';
 import { aggregate, type Granularity } from '../lib/aggregate';
+import {
+  DEFAULT_BATTERY,
+  perfectBatteryProfiles,
+  simulateBattery,
+  type BatteryConfig,
+} from '../lib/battery';
 import { DEFAULT_CONFIG, PLAN_IDS } from '../lib/rates';
 import type { PlanId, RateConfig } from '../lib/rates/types';
 import { toZonedTime, format as fmtTz } from 'date-fns-tz';
@@ -35,6 +42,7 @@ export default function App() {
   const [busyLabel, setBusyLabel] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
 
+  const [battery, setBattery] = useState<BatteryConfig>(DEFAULT_BATTERY);
   const [grain, setGrain] = useState<Granularity>('month');
   const [rangeStart, setRangeStart] = useState<string>('');
   const [rangeEnd, setRangeEnd] = useState<string>('');
@@ -69,6 +77,66 @@ export default function App() {
     if (!intervals) return null;
     return calcAll(intervals, config);
   }, [intervals, config]);
+
+  const spanDays = useMemo(() => {
+    if (!intervals || intervals.startSec.length === 0) return 0;
+    const n = intervals.startSec.length;
+    const spanSec =
+      intervals.startSec[n - 1]! + intervals.secondsPerInterval - intervals.startSec[0]!;
+    return spanSec / 86400;
+  }, [intervals]);
+
+  const batteryRows = useMemo<BatteryPlanRow[] | null>(() => {
+    if (!intervals || !results || !battery.enabled || spanDays <= 0) return null;
+    return PLAN_IDS.map((id) => {
+      const sim = simulateBattery(
+        config.plans[id],
+        intervals,
+        battery,
+        config.global.billingCycleDay,
+      );
+      const base = results[id];
+      const withBattery =
+        sim.kwhDischarged > 0 ? calcPlan(id, config, sim.intervals) : base;
+      const savings = base.totalCost - withBattery.totalCost;
+      return {
+        planId: id,
+        baseCost: base.totalCost,
+        batteryCost: withBattery.totalCost,
+        savings,
+        annualSavings: (savings * 365) / spanDays,
+        kwhDischarged: sim.kwhDischarged,
+        equivalentFullCycles: sim.equivalentFullCycles,
+      };
+    });
+  }, [intervals, results, battery, config, spanDays]);
+
+  const perfectRows = useMemo<PerfectPlanRow[] | null>(() => {
+    if (!intervals || !results || !battery.enabled || spanDays <= 0) return null;
+    return PLAN_IDS.map((id) => {
+      const base = results[id];
+      const candidates = perfectBatteryProfiles(
+        config.plans[id],
+        intervals,
+        battery.roundTripEfficiencyPct,
+        config.global.billingCycleDay,
+      );
+      // A perfect battery can always choose not to operate, so the baseline
+      // cost is an implicit candidate.
+      let best = base.totalCost;
+      for (const c of candidates) {
+        const cost = calcPlan(id, config, c.intervals).totalCost;
+        if (cost < best) best = cost;
+      }
+      const savings = base.totalCost - best;
+      return {
+        planId: id,
+        perfectCost: best,
+        savings,
+        annualSavings: (savings * 365) / spanDays,
+      };
+    });
+  }, [intervals, results, battery.enabled, battery.roundTripEfficiencyPct, config, spanDays]);
 
   const dataMin = useMemo(() => {
     if (!intervals || intervals.startSec.length === 0) return '';
@@ -127,6 +195,15 @@ export default function App() {
       {results && intervals && (
         <>
           <PlanCards results={results} config={config} />
+
+          <BatteryPanel
+            battery={battery}
+            onChange={setBattery}
+            rows={batteryRows}
+            perfectRows={perfectRows}
+            config={config}
+            spanDays={spanDays}
+          />
 
           <CostChart
             points={aggregated}

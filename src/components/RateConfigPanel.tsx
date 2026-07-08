@@ -7,7 +7,7 @@ interface Props {
   onChange: (next: RateConfig) => void;
 }
 
-function NumberField({
+export function NumberField({
   label,
   value,
   step = 0.0001,

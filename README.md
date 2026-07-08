@@ -32,6 +32,51 @@ Thanksgiving and the day after, Christmas (Sat→prior Fri, Sun→following Mon)
 Per-kWh riders and NC sales tax are **editable estimates** (defaults: 3.0¢/kWh and 7.0%);
 override them in the rate panel to match your latest bill.
 
+## Home battery simulation
+
+Enable the "Home battery simulation" panel to model a battery doing rate arbitrage — buying
+energy in each plan's cheapest windows and discharging to offset home load in the expensive
+ones. Inputs: usable capacity (kWh), max charge/discharge rate (kW), round-trip efficiency (%),
+and installed system cost ($, for payback). The panel shows, per plan, the cost with and without
+the battery, the savings over the uploaded data, annualized savings, and years to pay off the
+system.
+
+How the dispatch works:
+
+- Within each calendar day, profitable charge→discharge interval pairs are filled greedily
+  (largest price spread first) subject to power limits, capacity, and round-trip losses. The
+  battery starts and ends each day empty, and dispatch assumes perfect knowledge of the day's
+  prices — an upper bound on what real control software achieves.
+- Discharge only offsets home load; there is **no grid export** (no net metering).
+- **RES** prices energy the same all hours, so arbitrage saves $0 there by construction.
+- **R-TOUD**: charging is capped so the total draw never exceeds the month's original peak
+  (the battery can't *increase* the max-demand charge), and discharge targets the highest-load
+  on-peak intervals first, which also shaves on-peak demand.
+- **R-TOU-CPP**: the battery discharges through on-peak windows, so the worst-case CPP events
+  (re-selected on the modified load) are mitigated too.
+- Degradation, maintenance, and standby losses are not modeled.
+
+### Perfect battery ceiling
+
+Below the realistic table, a second table shows what an idealized battery — unlimited capacity,
+unlimited charge/discharge power — could save under each plan, plus what fraction of that
+ceiling the configured battery captures. Per plan:
+
+- **RES**: zero by construction (energy costs the same at every hour).
+- **Energy-only TOU plans** (R-TOU, R-TOU-CPP, R-TOU-EV): every kWh whose window price exceeds
+  the cost of battery-serving it — cheapest rate divided by round-trip efficiency — is instead
+  purchased during the billing month's cheapest-rate hours. With 100% efficiency this reduces to
+  "all energy bought at the lowest price". CPP events, re-selected on the shifted load, cost
+  nothing since on-peak grid draw is zero.
+- **R-TOUD**: energy shifting alone isn't optimal because of the demand charges. Grid purchasing
+  is flattened to a constant draw across the charge window, eliminating the on-peak demand
+  charge and minimizing the max-demand charge. Two charge windows are evaluated — discount hours
+  only, and discount + off-peak — and the cheaper wins (the monthly cost is linear in the peak
+  between those two endpoints, so the optimum is always one of them).
+
+The configured round-trip efficiency still applies to the perfect battery; set it to 100% for
+the absolute theoretical bound. Cycling is confined within each billing month.
+
 ## Assumptions and limitations
 
 - **Billing cycle**: bill labeled month X covers the period from "billing cycle day" of month X-1
@@ -89,6 +134,7 @@ src/
 │   ├── FileDrop.tsx
 │   ├── PlanCards.tsx
 │   ├── RateConfigPanel.tsx     # billing cycle day + per-plan numbers
+│   ├── BatteryPanel.tsx        # battery params + per-plan savings/payback table
 │   ├── CostChart.tsx
 │   ├── TouTable.tsx
 │   ├── DemandPanel.tsx
@@ -100,6 +146,7 @@ src/
     ├── tou.ts                  # season + holiday + window classifier
     ├── aggregate.ts            # resample to hour/day/week/month
     ├── calc.ts                 # cost engine, one function per plan kind
+    ├── battery.ts              # battery arbitrage dispatch simulation
     └── rates/
         ├── types.ts
         └── index.ts            # default RateConfig with the tariff numbers

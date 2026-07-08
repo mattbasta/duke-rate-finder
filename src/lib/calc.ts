@@ -399,14 +399,29 @@ export function calcRTouEv(plan: RTouEv, intervals: Intervals, billingCycleDay: 
   };
 }
 
-export function calcAll(intervals: Intervals, config: RateConfig): Record<PlanId, PlanResult> {
+export function calcPlan(planId: PlanId, config: RateConfig, intervals: Intervals): PlanResult {
   const cd = config.global.billingCycleDay;
+  switch (planId) {
+    case 'RES':
+      return calcRes(config.plans['RES'], intervals, cd);
+    case 'R-TOU':
+      return calcRTou(config.plans['R-TOU'], intervals, cd);
+    case 'R-TOUD':
+      return calcRTouD(config.plans['R-TOUD'], intervals, cd);
+    case 'R-TOU-CPP':
+      return calcRTouCpp(config.plans['R-TOU-CPP'], intervals, cd);
+    case 'R-TOU-EV':
+      return calcRTouEv(config.plans['R-TOU-EV'], intervals, cd);
+  }
+}
+
+export function calcAll(intervals: Intervals, config: RateConfig): Record<PlanId, PlanResult> {
   return {
-    'RES': calcRes(config.plans['RES'], intervals, cd),
-    'R-TOU': calcRTou(config.plans['R-TOU'], intervals, cd),
-    'R-TOUD': calcRTouD(config.plans['R-TOUD'], intervals, cd),
-    'R-TOU-CPP': calcRTouCpp(config.plans['R-TOU-CPP'], intervals, cd),
-    'R-TOU-EV': calcRTouEv(config.plans['R-TOU-EV'], intervals, cd),
+    'RES': calcPlan('RES', config, intervals),
+    'R-TOU': calcPlan('R-TOU', config, intervals),
+    'R-TOUD': calcPlan('R-TOUD', config, intervals),
+    'R-TOU-CPP': calcPlan('R-TOU-CPP', config, intervals),
+    'R-TOU-EV': calcPlan('R-TOU-EV', config, intervals),
   };
 }
 
